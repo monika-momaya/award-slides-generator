@@ -28,6 +28,20 @@ tagged with these tokens are used as stencils. Token matching is
 case-insensitive and tolerant of wrapper characters (e.g. "<<NOMINEES>>",
 "[NOMINEES]", or bare "NOMINEES" all match).
 
+SINGLE-STENCIL MODE (one stagnant template used for every slide): instead
+of two differently-tagged stencil slides, a template can use ONE slide for
+both roles by tagging it with <<NAMES>> instead of <<NOMINEES>>/<<WINNER>>:
+  - A text box containing "<<NAMES>>" receives the nominee list when that
+    clone is being generated as a Nominee slide, and the single winner's
+    name when that same stencil is cloned again as a Winner slide.
+  - An OPTIONAL text box containing "<<ROLE_LABEL>>" (usable on ANY
+    stencil -- single or two-slide setups, even the legacy style) is
+    auto-filled with the literal word "NOMINEES" or "WINNER" depending on
+    which role that particular clone is for. This is how a single,
+    visually-identical template can still tell its two slide types apart.
+  - <<AWARD_TEXT>> and the optional <<ZONE>> box work exactly the same as
+    in two-stencil mode.
+
 LEGACY FALLBACK: if a template has no literal tokens at all, it falls back
 to the older convention (a text box with wording like "Award Category
 Placeholder" plus one with "...Names Placeholder") -- the first such slide
@@ -333,6 +347,9 @@ TOKEN_AWARD_TEXT = "AWARD_TEXT"
 TOKEN_NOMINEES = "NOMINEES"
 TOKEN_WINNER = "WINNER"
 TOKEN_ZONE = "ZONE"
+# Single-stencil mode: one slide, reused for both roles.
+TOKEN_NAMES = "NAMES"          # generic names box (nominee list OR winner name)
+TOKEN_ROLE_LABEL = "ROLE_LABEL"  # filled with the literal word NOMINEES/WINNER
 
 # Legacy fallback style from earlier versions of this tool (kept working
 # so old templates don't break): textboxes containing these phrase
@@ -410,6 +427,13 @@ def classify_template_slides(template_path):
     if nominee_idx is not None or winner_idx is not None:
         return {"nominee": nominee_idx, "winner": winner_idx, "style": "tokens"}
 
+    # SINGLE-STENCIL fallback: no separate <<NOMINEES>>/<<WINNER>> boxes
+    # found anywhere, but a slide has the generic <<NAMES>> box instead --
+    # that one slide is used as the stencil for BOTH roles.
+    for i, slide in enumerate(prs.slides):
+        if find_shape_by_token(slide, TOKEN_NAMES) is not None:
+            return {"nominee": i, "winner": i, "style": "single"}
+
     # Legacy fallback: no literal tokens found anywhere. Look for the old
     # "Award Category Placeholder" / "Names Placeholder" style instead.
     legacy_slides = []
@@ -457,11 +481,16 @@ def duplicate_slide(prs, source_slide):
 
 def find_stencil_shapes(slide, role, style):
     """Find the (award_text_shape, names_shape, zone_shape_or_None) on a
-    stencil slide. `role` is 'nominee' or 'winner'. `style` is 'tokens' or
-    'legacy', as returned by classify_template_slides."""
+    stencil slide. `role` is 'nominee' or 'winner'. `style` is 'tokens',
+    'single', or 'legacy', as returned by classify_template_slides."""
     if style == "tokens":
         award_shape = find_shape_by_token(slide, TOKEN_AWARD_TEXT)
         names_shape = find_shape_by_token(slide, TOKEN_NOMINEES if role == "nominee" else TOKEN_WINNER)
+        zone_shape = find_shape_by_token(slide, TOKEN_ZONE)
+    elif style == "single":
+        # One stencil, one generic names box, reused for both roles.
+        award_shape = find_shape_by_token(slide, TOKEN_AWARD_TEXT)
+        names_shape = find_shape_by_token(slide, TOKEN_NAMES)
         zone_shape = find_shape_by_token(slide, TOKEN_ZONE)
     else:
         award_shape = find_shape_by_legacy_hint(slide, LEGACY_AWARD_TEXT_HINTS)
@@ -526,15 +555,22 @@ def populate_stencil_copy(prs, stencil_slide, role, style, slide_width,
         stencil_slide, role, style
     )
     if award_shape_orig is None or names_shape_orig is None:
-        token_desc = (
-            f"<<{TOKEN_AWARD_TEXT}>> and <<{TOKEN_NOMINEES if role == 'nominee' else TOKEN_WINNER}>>"
-            if style == "tokens" else "the award-category and names placeholders"
-        )
+        if style == "tokens":
+            token_desc = f"<<{TOKEN_AWARD_TEXT}>> and <<{TOKEN_NOMINEES if role == 'nominee' else TOKEN_WINNER}>>"
+        elif style == "single":
+            token_desc = f"<<{TOKEN_AWARD_TEXT}>> and <<{TOKEN_NAMES}>>"
+        else:
+            token_desc = "the award-category and names placeholders"
         raise ValueError(f"Could not find {token_desc} on the {role} stencil slide.")
+
+    # Optional cosmetic label (works on any style, single or two-stencil):
+    # a box containing <<ROLE_LABEL>> gets the literal word NOMINEES/WINNER.
+    role_label_shape_orig = find_shape_by_token(stencil_slide, TOKEN_ROLE_LABEL)
 
     award_name = award_shape_orig.name
     names_name = names_shape_orig.name
     zone_name = zone_shape_orig.name if zone_shape_orig is not None else None
+    role_label_name = role_label_shape_orig.name if role_label_shape_orig is not None else None
 
     line_height = award_shape_orig.height
     box_width = Emu(int(TITLE_BOX_WIDTH_IN * 914400))
@@ -549,6 +585,9 @@ def populate_stencil_copy(prs, stencil_slide, role, style, slide_width,
     award_shape = find_shape_by_remembered_name(new_slide, award_name)
     names_shape = find_shape_by_remembered_name(new_slide, names_name)
     zone_shape = find_shape_by_remembered_name(new_slide, zone_name) if zone_name else None
+    role_label_shape = (
+        find_shape_by_remembered_name(new_slide, role_label_name) if role_label_name else None
+    )
 
     title_height = line_height * len(title_lines)
     names_height = line_height * len(names)
@@ -569,6 +608,9 @@ def populate_stencil_copy(prs, stencil_slide, role, style, slide_width,
             # removing it from the slide's shape tree is the correct way
             # to hide it).
             zone_shape._element.getparent().remove(zone_shape._element)
+
+    if role_label_shape is not None:
+        set_single_line(role_label_shape, "NOMINEES" if role == "nominee" else "WINNER")
 
     return new_slide
 
@@ -597,7 +639,9 @@ def build_combined_deck(template_path, groups, output_path, seed=RANDOM_SEED):
             f"Could not find a Nominee stencil (a slide containing <<{TOKEN_NOMINEES}>>) "
             f"or a Winner stencil (a slide containing <<{TOKEN_WINNER}>>) anywhere in the "
             f"template. Make sure at least one slide has a text box containing the literal "
-            f"text '<<{TOKEN_NOMINEES}>>' and/or '<<{TOKEN_WINNER}>>'."
+            f"text '<<{TOKEN_NOMINEES}>>' and/or '<<{TOKEN_WINNER}>>' -- or, for a single "
+            f"stagnant template reused for both roles, a text box containing "
+            f"'<<{TOKEN_NAMES}>>' instead."
         )
 
     prs = Presentation(template_path)

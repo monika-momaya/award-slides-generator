@@ -48,6 +48,7 @@ with st.sidebar:
     )
 
     st.subheader("PowerPoint template")
+    st.markdown("**Option A — separate Nominee and Winner stencil slides**")
     st.markdown(
         """
 A slide's role is decided by which **placeholder text box** it contains —
@@ -73,6 +74,24 @@ the double angle brackets) inside text boxes on your template slides:
 - Add `<<ZONE>>` only if your awards are split by region.
 - Any other slide with none of these tokens (e.g. a title or thank-you
   slide) is left as-is and copied through once at the end of the deck.
+        """
+    )
+
+    st.markdown("**Option B — one stagnant template for both slide types**")
+    st.markdown(
+        """
+Prefer a single, unchanging slide design used for every award (no
+separate Nominee/Winner layouts)? Use these tokens instead of
+`<<NOMINEES>>`/`<<WINNER>>`:
+
+| Token | Meaning |
+|---|---|
+| `<<NAMES>>` | Generic names box — filled with the full nominee list on Nominee slides, and with just the winner's name on Winner slides |
+| `<<ROLE_LABEL>>` | *(Optional)* Auto-filled with the literal word **NOMINEES** or **WINNER**, so each generated slide is visually labelled |
+
+`<<AWARD_TEXT>>` and the optional `<<ZONE>>` work the same as in Option A.
+Only **one** slide is needed in the template — it gets cloned twice per
+award (once per role) automatically.
         """
     )
     st.info(
