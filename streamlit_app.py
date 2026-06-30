@@ -39,38 +39,65 @@ st.write(
     "a Nominee slide immediately followed by its Winner slide."
 )
 
-with st.expander("ℹ️ What your files need to look like", expanded=False):
+with st.sidebar:
+    st.header("📋 Template naming convention")
+    st.caption(
+        "Read this before uploading — it explains exactly what your "
+        "PowerPoint template and Excel file need to contain so the "
+        "generator can recognize them correctly."
+    )
+
+    st.subheader("PowerPoint template")
     st.markdown(
         """
-**Excel file** — one sheet. Column *headers* can say anything; the columns
-are recognized by the *shape* of their data, not their names:
-- A column with award category text, filled only on the first row of each
-  award's block.
-- A column with company/nominee names, filled on every row.
-- A column with a small repeating set of result labels (e.g. `Winner`,
-  `1st Runnerup`, `2nd Runnerup` — or any similar wording).
-- *(Optional)* a column with a small repeating set of zone/region values
-  (e.g. `North`/`South`/`East`/`West`).
+A slide's role is decided by which **placeholder text box** it contains —
+not by its position or slide number. Place these exact tokens (including
+the double angle brackets) inside text boxes on your template slides:
+        """
+    )
+    st.markdown(
+        """
+| Token | Meaning |
+|---|---|
+| `<<NOMINEES>>` | Marks this slide as the **Nominee** stencil |
+| `<<WINNER>>` | Marks this slide as the **Winner** stencil |
+| `<<AWARD_TEXT>>` | Where the award category title is inserted |
+| `<<ZONE>>` | *(Optional)* Where the zone/region name is inserted |
+        """
+    )
+    st.markdown(
+        """
+- You need **one slide with `<<NOMINEES>>`** and **one slide with
+  `<<WINNER>>`** somewhere in the template — order doesn't matter.
+- Both of those slides should also include an `<<AWARD_TEXT>>` text box.
+- Add `<<ZONE>>` only if your awards are split by region.
+- Any other slide with none of these tokens (e.g. a title or thank-you
+  slide) is left as-is and copied through once at the end of the deck.
+        """
+    )
+    st.info(
+        "Older templates that instead use text boxes literally reading "
+        "something like \"Award Category Placeholder\" and \"...Names "
+        "Placeholder\" (no angle brackets) are still supported "
+        "automatically as a legacy fallback.",
+        icon="🗂️",
+    )
+
+    st.subheader("Excel spreadsheet")
+    st.markdown(
+        """
+One sheet. Column **headers can say anything** — columns are recognized by
+the *shape* of their data, not their names:
+- **Category column** — award category text, filled only on the first row
+  of each award's block.
+- **Nominee column** — company/nominee names, filled on every row.
+- **Result column** — a small repeating set of labels, e.g. `Winner`,
+  `1st Runnerup`, `2nd Runnerup` (or similar wording).
+- *(Optional)* **Zone column** — a small repeating set of region values,
+  e.g. `North` / `South` / `East` / `West`.
 
 A blank row separates one zone's group of nominees from the next zone's
 group within the same category.
-
-**PowerPoint template** — any number of slides, in any order. A slide's
-role is decided by which placeholder text box it contains:
-- A text box containing **`<<NOMINEES>>`** → that slide becomes the
-  Nominee stencil.
-- A text box containing **`<<WINNER>>`** → that slide becomes the
-  Winner stencil.
-- Either stencil should also have a text box containing **`<<AWARD_TEXT>>`**
-  (the category title goes here), and optionally one containing
-  **`<<ZONE>>`** (the zone name, for categories split by region).
-- Any other slide (no recognized token) is left untouched and copied
-  through once, at the end of the output deck — e.g. a title or
-  thank-you slide.
-
-Older templates built before this token convention (a text box reading
-something like *"Award Category Placeholder"* plus one reading
-*"...Names Placeholder"*) are also still supported automatically.
         """
     )
 
