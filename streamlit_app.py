@@ -48,58 +48,50 @@ with st.sidebar:
     )
 
     st.subheader("PowerPoint template")
-    st.markdown("**Option A — separate Nominee and Winner stencil slides**")
     st.markdown(
         """
 A slide's role is decided by which **placeholder text box** it contains —
-not by its position or slide number. Place these exact tokens (including
-the double angle brackets) inside text boxes on your template slides:
+not by its position or slide number. Every token below is **optional**
+except that a slide needs at least `<<NOMINEES>>` or `<<WINNER>>` to be
+used at all. Each box keeps its own existing position, size, and
+formatting — only its text changes.
         """
     )
     st.markdown(
         """
 | Token | Meaning |
 |---|---|
-| `<<NOMINEES>>` | Marks this slide as the **Nominee** stencil |
-| `<<WINNER>>` | Marks this slide as the **Winner** stencil |
-| `<<AWARD_TEXT>>` | Where the award category title is inserted |
+| `<<NOMINEES>>` | Marks this slide as the **Nominee** stencil. The box itself is filled with the full nominee list, one per line |
+| `<<WINNER>>` | Marks this slide as the **Winner** stencil. The box is filled with the winning company's name |
+| `<<AWARD CATEGORY>>` | *(Optional)* Where the award category title is inserted |
 | `<<ZONE>>` | *(Optional)* Where the zone/region name is inserted |
+| `<<nominees-word>>` | *(Optional)* Replaced with the literal word **NOMINEES** |
+| `<<winner-word>>` | *(Optional)* Replaced with the literal word **WINNER** |
         """
+    )
+    st.error(
+        "**Matching is literal and exact.** The box's text must be exactly "
+        "one of the tokens above (case doesn't matter, but wording does). "
+        "`<<winner placeholder>>` or `<<Winner Name>>` will **NOT** match "
+        "`<<WINNER>>` — type the token exactly as shown.",
+        icon="⚠️",
     )
     st.markdown(
         """
-- You need **one slide with `<<NOMINEES>>`** and **one slide with
-  `<<WINNER>>`** somewhere in the template — order doesn't matter.
-- Both of those slides should also include an `<<AWARD_TEXT>>` text box.
-- Add `<<ZONE>>` only if your awards are split by region.
+**Mix and match freely** depending on what each event needs:
+- **Nominee slide + Winner slide** (two stencils) — the classic case: a
+  slide with `<<NOMINEES>>`, immediately followed in the output by a slide
+  with `<<WINNER>>`, for every award.
+- **Winner-only** — for events with no nominee reveal, just include a
+  single slide with `<<WINNER>>` (and skip `<<NOMINEES>>` entirely). Only
+  Winner slides are generated.
+- **Nominee-only** works the same way, the other direction.
+- Add `<<AWARD CATEGORY>>` / `<<ZONE>>` / `<<nominees-word>>` /
+  `<<winner-word>>` on either stencil only where you actually want that
+  content to appear — leave them off entirely if you don't need them.
 - Any other slide with none of these tokens (e.g. a title or thank-you
   slide) is left as-is and copied through once at the end of the deck.
         """
-    )
-
-    st.markdown("**Option B — one stagnant template for both slide types**")
-    st.markdown(
-        """
-Prefer a single, unchanging slide design used for every award (no
-separate Nominee/Winner layouts)? Use these tokens instead of
-`<<NOMINEES>>`/`<<WINNER>>`:
-
-| Token | Meaning |
-|---|---|
-| `<<NAMES>>` | Generic names box — filled with the full nominee list on Nominee slides, and with just the winner's name on Winner slides |
-| `<<ROLE_LABEL>>` | *(Optional)* Auto-filled with the literal word **NOMINEES** or **WINNER**, so each generated slide is visually labelled |
-
-`<<AWARD_TEXT>>` and the optional `<<ZONE>>` work the same as in Option A.
-Only **one** slide is needed in the template — it gets cloned twice per
-award (once per role) automatically.
-        """
-    )
-    st.info(
-        "Older templates that instead use text boxes literally reading "
-        "something like \"Award Category Placeholder\" and \"...Names "
-        "Placeholder\" (no angle brackets) are still supported "
-        "automatically as a legacy fallback.",
-        icon="🗂️",
     )
 
     st.subheader("Excel spreadsheet")

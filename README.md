@@ -47,9 +47,32 @@ step needed.
 ## What it does NOT change
 
 The detection logic — how columns are recognized in the Excel regardless
-of header names, how slides are recognized in the template by their
-`<<NOMINEES>>` / `<<WINNER>>` / `<<AWARD_TEXT>>` / `<<ZONE>>` placeholders,
-the winner-picking rule, the legacy-template fallback — is all identical
-to the command-line `.bat` version. See the main project README for the
-full explanation of those rules; this app is only a different way to run
-the same engine.
+of header names, the winner-picking rule — is identical to the
+command-line `.bat` version.
+
+## Template naming convention
+
+A slide's role is decided by which **placeholder text box** it contains.
+Every token is optional except that a slide needs at least one of
+`<<NOMINEES>>` / `<<WINNER>>` to be used as a stencil at all — mix and
+match per event:
+
+| Token | Meaning |
+|---|---|
+| `<<NOMINEES>>` | Marks this slide as the Nominee stencil; the box is filled with the full nominee list, one per line |
+| `<<WINNER>>` | Marks this slide as the Winner stencil; the box is filled with the winning company's name |
+| `<<AWARD CATEGORY>>` | *(Optional)* Award category title |
+| `<<ZONE>>` | *(Optional)* Zone/region name, for categories split by region |
+| `<<nominees-word>>` | *(Optional)* Replaced with the literal word **NOMINEES** |
+| `<<winner-word>>` | *(Optional)* Replaced with the literal word **WINNER** |
+
+Matching is **literal and exact** (case-insensitive only) — a box must
+contain exactly one of these tokens, not a sentence containing the word
+(e.g. `<<winner placeholder>>` will NOT match `<<WINNER>>`).
+
+Each placeholder box keeps its own original position, size, and
+formatting from the template — only its text content is replaced.
+
+Events that only need a winner announcement (no nominee reveal) can use a
+template with just one slide containing `<<WINNER>>` and skip
+`<<NOMINEES>>` entirely; the deck will then contain only Winner slides.
