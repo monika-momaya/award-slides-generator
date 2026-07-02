@@ -83,6 +83,7 @@ import re
 import copy
 import random
 import openpyxl
+from docx import Document as DocxDocument
 from pptx import Presentation
 
 RANDOM_SEED = 42
@@ -304,6 +305,216 @@ def parse_excel(path):
         if name:
             current_entries.append((str(name).strip(), zone, result))
     flush()
+    return groups
+
+
+def _paragraph_is_category_heading(para):
+    """True if this paragraph looks like an award category heading rather
+    than a data row or blank line. Signals checked (any one is enough):
+      - paragraph style name contains 'heading'
+      - ALL runs are bold (or the paragraph has no runs but text is non-empty)
+      - paragraph text is non-empty and the paragraph immediately precedes
+        a table (checked by the caller)
+    We deliberately do NOT require a specific style name so the function
+    works with any Word template/export that uses bold or heading styles."""
+    text = para.text.strip()
+    if not text:
+        return False
+    style_name = (para.style.name or "").lower()
+    if "heading" in style_name:
+        return True
+    runs = [r for r in para.runs if r.text.strip()]
+    if runs and all(r.bold for r in runs):
+        return True
+    return False
+
+
+def _table_to_rows(table):
+    """Extract a Word table into a list of lists of cell text strings.
+    Blank rows (all cells empty) are kept because they act as zone
+    separators between nominee groups, mirroring how blank Excel rows work.
+    Only completely phantom rows (no cells at all) are excluded."""
+    rows = []
+    for row in table.rows:
+        cells = [c.text.strip() for c in row.cells]
+        if cells:          # keep even if all values are empty strings
+            rows.append(cells)
+    return rows
+
+
+def _detect_columns_from_rows(data_rows):
+    """Same shape-based column detection used for Excel, adapted for a
+    list-of-lists (Word table rows). Returns (name_col, zone_col,
+    result_col) indices, or raises ValueError if detection fails.
+
+    Detection order: name → result → zone (from what's left).
+    This ordering is critical: names have the highest uniqueness, which
+    would otherwise make them look like a zone or result column if those
+    are scored first. Result gets a strong bonus if any value contains the
+    word 'winner', which is the clearest signal available."""
+    if not data_rows:
+        raise ValueError("Table has no data rows.")
+
+    ncols = max(len(r) for r in data_rows)
+    total = len(data_rows)
+    col_values = [[r[i] if i < len(r) else "" for r in data_rows] for i in range(ncols)]
+    profiles = [profile_column(vals, total) for vals in col_values]
+
+    def name_score(p):
+        # Dense fill, high uniqueness, alphabetic-rich, not a phone/email col.
+        if p["fill_ratio"] < 0.5 or p["pct_at_sign"] > 0.05 or p["pct_numeric"] > 0.3:
+            return -1
+        return p["fill_ratio"] * 0.3 + p["uniq_ratio"] * 0.5 + p["pct_alpha_rich"] * 0.2
+
+    def result_score(p, col_idx):
+        # Small closed vocab (2–8 distinct values), short text.
+        # Strong bonus if any value in the column contains "winner".
+        if p["fill_ratio"] < 0.5 or p["distinct"] > 8 or p["distinct"] < 2:
+            return -1
+        vals_lower = [str(v).lower() for v in col_values[col_idx] if v]
+        winner_bonus = 0.4 if any("winner" in v for v in vals_lower) else 0
+        closed_vocab = 1 - min(p["distinct"] / 8, 1)
+        shortness = max(0, 1 - p["avg_len"] / 30)
+        return p["fill_ratio"] * 0.2 + closed_vocab * 0.4 + shortness * 0.1 + winner_bonus
+
+    def zone_score(p):
+        # Like result: small vocab, but typically geographic (short words).
+        # Requires LOWER uniqueness than name (zones repeat a lot).
+        if p["fill_ratio"] < 0.5 or p["distinct"] > 10 or p["distinct"] < 2:
+            return -1
+        if p["uniq_ratio"] > 0.8:   # too unique to be a repeating zone col
+            return -1
+        return (1 - min(p["distinct"] / 10, 1)) * 0.7 + p["fill_ratio"] * 0.3
+
+    def best(scores, exclude=()):
+        candidates = [(s, i) for i, s in enumerate(scores) if i not in exclude and s > 0]
+        return max(candidates, default=(None, None))[1]
+
+    # Step 1: name (highest uniqueness wins; detect before zone/result)
+    n_scores = [name_score(profiles[i]) for i in range(ncols)]
+    name_col = best(n_scores)
+
+    # Step 2: result (from remaining cols; winner-keyword bonus is decisive)
+    used = {name_col} if name_col is not None else set()
+    r_scores = [result_score(profiles[i], i) for i in range(ncols)]
+    result_col = best(r_scores, exclude=used)
+
+    # Step 3: zone (from what's left)
+    used = used | ({result_col} if result_col is not None else set())
+    z_scores = [zone_score(profiles[i]) for i in range(ncols)]
+    zone_col = best(z_scores, exclude=used)
+
+    if name_col is None or result_col is None:
+        missing = [n for n, v in [("Nominee Name", name_col), ("Result/Winner status", result_col)] if v is None]
+        raise ValueError(
+            f"Could not identify the {', '.join(missing)} column(s) from the Word table. "
+            f"The table needs at least a nominee-name column and a result/winner-status column."
+        )
+    return name_col, zone_col, result_col
+
+
+def parse_word(path):
+    """Parse a Word document (.docx) into the same list-of-groups format
+    returned by parse_excel(), so build_combined_deck() needs no changes.
+
+    Expected document structure (tolerant of minor variations):
+      - An award category heading (bold paragraph or Heading style) appears
+        BEFORE the table that contains that category's nominees.
+      - Each table contains nominee rows with at least a name column and a
+        result/winner-status column; an optional zone column is auto-detected.
+      - Multiple categories = multiple (heading, table) pairs anywhere in
+        the document, in any order.
+      - A table with no preceding heading paragraph reuses the most recent
+        heading seen (graceful fallback for unusual layouts).
+
+    Column detection inside each table is shape-based (same logic as Excel)
+    so column headers can say anything -- only the data shape matters.
+    """
+    doc = DocxDocument(path)
+    groups = []
+    pending_category = None  # most recent heading not yet consumed by a table
+
+    # Walk the document body in order. python-docx exposes body elements as
+    # either paragraphs or tables via doc.element.body iteration, but the
+    # higher-level API (doc.paragraphs / doc.tables) loses ordering. We use
+    # the XML element iteration to preserve document order.
+    body = doc.element.body
+    from docx.oxml.ns import qn
+    from docx.text.paragraph import Paragraph as DocxParagraph
+    from docx.table import Table as DocxTable
+
+    for child in body.iterchildren():
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+
+        if tag == "p":
+            para = DocxParagraph(child, doc)
+            if _paragraph_is_category_heading(para):
+                pending_category = para.text.strip()
+
+        elif tag == "tbl":
+            table = DocxTable(child, doc)
+            raw_rows = _table_to_rows(table)
+            if not raw_rows:
+                continue
+
+            # First row is the header if it looks like one (text, low
+            # uniqueness across columns, or contains known keywords).
+            header_row = raw_rows[0]
+            data_rows = raw_rows[1:] if len(raw_rows) > 1 else raw_rows
+
+            if not data_rows:
+                continue
+
+            try:
+                name_col, zone_col, result_col = _detect_columns_from_rows(data_rows)
+            except ValueError as e:
+                print(f"  [Word] Skipping table (column detection failed): {e}")
+                continue
+
+            # Group data rows by zone (blank row = zone separator, same as Excel).
+            category = pending_category or "Unknown Category"
+            pending_category = None  # consumed
+
+            current_entries = []
+
+            def flush_word_group(entries, category, groups):
+                if entries:
+                    results = [e[2] for e in entries]
+                    winner_idx = determine_winner_index(results)
+                    flagged = [
+                        (name, zone, result, i == winner_idx)
+                        for i, (name, zone, result) in enumerate(entries)
+                    ]
+                    groups.append({"category": category, "entries": flagged})
+
+            for row in data_rows:
+                name = row[name_col] if name_col < len(row) else ""
+                zone = row[zone_col] if (zone_col is not None and zone_col < len(row)) else None
+                result = row[result_col] if result_col < len(row) else ""
+
+                # Blank row within the table = zone separator
+                if not name and not result:
+                    flush_word_group(current_entries, category, groups)
+                    current_entries = []
+                    continue
+
+                if name:
+                    current_entries.append((
+                        clean_company_name(name),
+                        zone if zone else None,
+                        result if result else None,
+                    ))
+
+            flush_word_group(current_entries, category, groups)
+
+    if not groups:
+        raise ValueError(
+            "No award categories or nominee tables were found in the Word document. "
+            "Make sure each table is preceded by a bold heading paragraph containing "
+            "the award category name."
+        )
+
+    print(f"Parsed {len(groups)} category/zone groups from {os.path.basename(path)}")
     return groups
 
 
