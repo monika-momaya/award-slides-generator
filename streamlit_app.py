@@ -23,7 +23,7 @@ import traceback
 
 import streamlit as st
 
-from generate_award_slides import parse_excel, parse_word, build_combined_deck
+from generate_award_slides import parse_excel, build_combined_deck
 
 
 st.set_page_config(
@@ -34,7 +34,7 @@ st.set_page_config(
 
 st.title("🏆 Award Slide Generator")
 st.write(
-    "Upload your results spreadsheet (Excel or Word) and your PowerPoint certificate "
+    "Upload your results spreadsheet and your PowerPoint certificate "
     "template. You'll get back one ready-to-present deck: for every award, "
     "a Nominee slide immediately followed by its Winner slide."
 )
@@ -51,10 +51,9 @@ with st.sidebar:
     st.markdown(
         """
 A slide's role is decided by which **placeholder text box** it contains —
-not by its position or slide number. Every token below is **optional**
-except that a slide needs at least `<<NOMINEES>>` or `<<WINNER>>` to be
-used at all. Each box keeps its own existing position, size, and
-formatting — only its text changes.
+not by its position or slide number. **Every token is optional** — the
+app generates only what your template provides. Place any of these inside
+text boxes on your slides:
         """
     )
     st.markdown(
@@ -79,40 +78,34 @@ formatting — only its text changes.
     st.markdown(
         """
 **Mix and match freely** depending on what each event needs:
-- **Nominee slide + Winner slide** (two stencils) — the classic case: a
-  slide with `<<NOMINEES>>`, immediately followed in the output by a slide
-  with `<<WINNER>>`, for every award.
-- **Winner-only** — for events with no nominee reveal, just include a
-  single slide with `<<WINNER>>` (and skip `<<NOMINEES>>` entirely). Only
-  Winner slides are generated.
-- **Nominee-only** works the same way, the other direction.
+- **Nominee slide + Winner slide** — include both `<<NOMINEES>>` and
+  `<<WINNER>>` in your template (on separate slides).
+- **Winner-only** — include only `<<WINNER>>`. Only Winner slides are generated.
+- **Nominee-only** — include only `<<NOMINEES>>`. Only Nominee slides are generated.
+- **No placeholders at all** — passthrough slides (e.g. a title or
+  thank-you slide) are still copied through to the output deck.
 - Add `<<AWARD CATEGORY>>` / `<<ZONE>>` / `<<nominees-word>>` /
-  `<<winner-word>>` on either stencil only where you actually want that
-  content to appear — leave them off entirely if you don't need them.
-- Any other slide with none of these tokens (e.g. a title or thank-you
-  slide) is left as-is and copied through once at the end of the deck.
+  `<<winner-word>>` on any slide, or leave them off entirely.
+- Any slide with none of these tokens is left as-is and copied through
+  once at the end of the deck.
         """
     )
 
-    st.subheader("Data file (Excel or Word)")
+    st.subheader("Excel spreadsheet")
     st.markdown(
         """
-Upload either an **Excel spreadsheet** (`.xlsx` / `.xlsm`) or a
-**Word document** (`.docx`) — the app detects which one automatically.
-
-**Excel:** one sheet, any column headers. Columns are recognised by the
-shape of their data, not their names:
-- **Category column** — award category text, filled only on the first row of each award's block.
+One sheet. Column **headers can say anything** — columns are recognized by
+the *shape* of their data, not their names:
+- **Category column** — award category text, filled only on the first row
+  of each award's block.
 - **Nominee column** — company/nominee names, filled on every row.
-- **Result column** — a small repeating set of labels, e.g. `Winner`, `1st Runnerup`.
-- *(Optional)* **Zone column** — e.g. `North` / `South` / `East` / `West`.
+- **Result column** — a small repeating set of labels, e.g. `Winner`,
+  `1st Runnerup`, `2nd Runnerup` (or similar wording).
+- *(Optional)* **Zone column** — a small repeating set of region values,
+  e.g. `North` / `South` / `East` / `West`.
 
-A blank row separates one zone's nominees from the next within the same category.
-
-**Word document:** structured as one or more **(heading → table)** pairs:
-- A **bold paragraph** (or Word Heading style) immediately above a table is treated as that table's award category title.
-- Each **table** contains the nominees for that category — same columns as Excel (name, result, optional zone), any header wording.
-- A **blank row inside a table** acts as a zone separator, same as in Excel.
+A blank row separates one zone's group of nominees from the next zone's
+group within the same category.
         """
     )
 
@@ -121,10 +114,7 @@ st.divider()
 col1, col2 = st.columns(2)
 with col1:
     excel_file = st.file_uploader(
-        "Results spreadsheet or Word document",
-        type=["xlsx", "xlsm", "docx"],
-        key="excel_upload",
-        help="Upload either an Excel spreadsheet (.xlsx / .xlsm) or a Word document (.docx)",
+        "Results spreadsheet", type=["xlsx", "xlsm"], key="excel_upload"
     )
 with col2:
     template_file = st.file_uploader(
@@ -164,10 +154,7 @@ if generate_clicked and excel_file and template_file:
         try:
             with st.spinner("Reading the spreadsheet and template, then building the deck..."):
                 with contextlib.redirect_stdout(log_buffer):
-                    if excel_file.name.lower().endswith(".docx"):
-                        groups = parse_word(excel_path)
-                    else:
-                        groups = parse_excel(excel_path)
+                    groups = parse_excel(excel_path)
                     if not groups:
                         raise ValueError(
                             "No category/nominee rows were found. Check the Excel "
